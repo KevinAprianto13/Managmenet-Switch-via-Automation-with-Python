@@ -4,24 +4,29 @@ import time
 
 # Fungsi untuk memilih vendor perangkat
 def vendor_selection():
-    print("\n=== Pilih Vendor ===")
-    print("1. Cisco")
-    print("2. Aruba")
-    print("3. Dell")
-    print("4. MikroTik")
-    vendor = input("Pilih vendor [1-4]: ")
+    while True:  # Loop agar bisa kembali ke menu pemilihan vendor jika ada kesalahan
+        try:
+            print("\n=== Pilih Vendor ===")
+            print("1. Cisco")
+            print("2. Aruba")
+            print("3. Dell")
+            print("4. MikroTik")
+            vendor = input("Pilih vendor [1-4]: ")
 
-    if vendor == '1':
-        return 'cisco_ios'
-    elif vendor == '2':
-        return 'aruba_os'
-    elif vendor == '3':
-        return 'dell_os'
-    elif vendor == '4':
-        return 'mikrotik'
-    else:
-        print("❌ Vendor tidak valid.")
-        return None
+            if vendor == '1':
+                return 'cisco_ios'
+            elif vendor == '2':
+                return 'aruba_os'
+            elif vendor == '3':
+                return 'dell_os'
+            elif vendor == '4':
+                return 'mikrotik'
+            else:
+                print("❌ Vendor tidak valid.")
+                continue  # Jika input salah, minta input ulang
+        except KeyboardInterrupt:
+            print("\nOperasi dibatalkan. Kembali ke menu utama...")
+            return None  # Mengembalikan None untuk kembali ke menu utama
 
 # Fungsi untuk login ke perangkat
 def connect_device(device_type):
@@ -44,6 +49,7 @@ def connect_device(device_type):
     except Exception as e:
         print(f"❌ Gagal konek: {e}")
         return None
+
 
 # Fungsi untuk konfigurasi Trunk Port
 def trunk_port_config(device, vendor_type):
@@ -115,35 +121,57 @@ def port_security(device, vendor_type):
     port = input("Masukkan port (contoh 1/0/1): ")
     max_mac = input("Maksimum MAC address (contoh 1): ")
     sticky = input("Gunakan sticky MAC? (Y/n): ").lower()
+    violation = input("Tindakan pelanggaran (shutdown/protect/restrict): ").lower()
+    aging_time = input("Waktu aging (menit, contoh 5): ")
 
     if vendor_type == 'cisco_ios' or vendor_type == 'dell_os':
         commands = [
             f"interface {port}",
             "switchport mode access",
             "switchport port-security",
-            f"switchport port-security maximum {max_mac}"
+            f"switchport port-security maximum {max_mac}",
+            f"switchport port-security aging time {aging_time}",
+            f"switchport port-security violation {violation}"
         ]
         if sticky == 'y' or sticky == '':
             commands.append("switchport port-security mac-address sticky")
+    
     elif vendor_type == 'aruba_os':
         commands = [
             f"interface {port}",
             "port-access security",
-            f"port-access security maximum {max_mac}"
+            f"port-access security maximum {max_mac}",
+            f"port-access security aging time {aging_time}",
+            f"port-access security violation {violation}"
         ]
         if sticky == 'y' or sticky == '':
             commands.append("port-access security mac-address sticky")
+    
     elif vendor_type == 'mikrotik':
+        # MikroTik memiliki format yang sedikit berbeda
         commands = [
             f"/interface ethernet switch port set {port} security-mac-address-limit={max_mac}",
-            f"/interface ethernet switch port set {port} security-mac-address-sticky={sticky}"
+            f"/interface ethernet switch port set {port} security-mac-address-sticky={sticky}",
+            f"/interface ethernet switch port set {port} security-aging-time={aging_time}",
         ]
+        if violation == "shutdown":
+            commands.append(f"/interface ethernet switch port set {port} security-violation=drop")
+        elif violation == "restrict":
+            commands.append(f"/interface ethernet switch port set {port} security-violation=reject")
+        elif violation == "protect":
+            commands.append(f"/interface ethernet switch port set {port} security-violation=protect")
+        else:
+            print("❌ Tindakan pelanggaran tidak valid. Gunakan 'shutdown', 'protect', atau 'restrict'.")
+            return
+
     else:
         print("❌ Vendor tidak valid.")
         return
 
+    # Mengirimkan konfigurasi ke perangkat
     device.send_config_set(commands)
     print("✅ Port Security dikonfigurasi.")
+
 
 # Fungsi untuk konfigurasi Spanning Tree Protocol (STP)
 def stp_config(device, vendor_type):
@@ -178,17 +206,28 @@ def ganti_hostname(device, vendor_type):
     device.send_config_set([command])
     print("✅ Hostname diganti.")
 
-def save_config(device):
+def save_config(device, vendor_type):
     try:
-        time.sleep(1)  # Memberikan jeda waktu agar perangkat siap
-        device.send_command("write memory")
+        time.sleep(1)  # Jeda agar perangkat siap
+
+        if vendor_type == 'cisco_ios' or vendor_type == 'dell_os':
+            device.send_command("write memory")
+        elif vendor_type == 'aruba_os':
+            device.send_command("write memory")  # Aruba OS CLI juga sering pakai ini
+        elif vendor_type == 'mikrotik':
+            device.send_command("/system backup save name=config-backup")
+        else:
+            print("❌ Vendor tidak dikenali.")
+            return
+
         print("✅ Konfigurasi disimpan.")
     except Exception as e:
         print(f"❌ Gagal menyimpan konfigurasi: {str(e)}")
 
 
+
 def access_list(device, vendor_type):
-    acl_number = input("Masukkan nomor ACL (contoh: 10 atau 110): ")
+    acl_number = input("Masukkan nomor ACL (contoh: 10 atau 110): ").strip()
     action = input("Masukkan Aturan (permit / deny): ").lower()
     protocol = input("Masukkan Protocol (ip / tcp / udp): ").lower()
 
@@ -204,30 +243,42 @@ def access_list(device, vendor_type):
         wildcard_destination = input("Masukkan wildcard bits untuk destination (contoh: 0.0.0.255): ").strip()
         destination = f"{destination} {wildcard_destination}"
 
-    # Lainnya
-    port = input("Masukkan port (kosongkan jika tidak perlu, contoh: eq 80): ").strip()
-    interface = input("Masukkan interface yang akan diberi ACL (contoh: FastEthernet0/1): ")
+    # Port hanya jika TCP/UDP
+    port = ""
+    if protocol in ["tcp", "udp"]:
+        port = input("Masukkan port (kosongkan jika tidak perlu, contoh: eq 80): ").strip()
+
+    interface = input("Masukkan interface yang akan diberi ACL (contoh: FastEthernet0/1): ").strip()
     direction = input("Masukkan arah ACL (in / out): ").lower()
 
     if vendor_type in ['cisco_ios', 'dell_os']:
-        acl_cmd = f"access-list {acl_number} {action} {protocol} {source} {destination} {port}".strip()
-        apply_cmd = [
-            f"interface {interface}",
-            f"ip access-group {acl_number} {direction}"
-        ]
-        device.send_config_set([acl_cmd] + apply_cmd)
+        commands = []
+
+        if int(acl_number) < 100:
+            # Standard ACL hanya source
+            acl_cmd = f"access-list {acl_number} {action} {source}".strip()
+        else:
+            # Extended ACL lengkap
+            acl_cmd = f"access-list {acl_number} {action} {protocol} {source} {destination} {port}".strip()
+
+        commands.append(acl_cmd)
+        commands.append(f"interface {interface}")
+        commands.append(f"ip access-group {acl_number} {direction}")
+        device.send_config_set(commands)
         print("✅ ACL dikonfigurasi untuk Cisco/Dell.")
 
     elif vendor_type == 'aruba_os':
         acl_name = f"ACL_{acl_number}"
-        acl_cmd = [
-            f"ip access-list extended {acl_name}",
-            f" {action} {protocol} {source} {destination} {port}".strip(),
-            "exit",
-            f"interface {interface}",
-            f"ip access-group {acl_name} {direction}"
-        ]
-        device.send_config_set(acl_cmd)
+        acl_lines = [f"ip access-list extended {acl_name}"]
+
+        rule = f" {action} {protocol} {source} {destination}"
+        if port:
+            rule += f" {port}"
+        acl_lines.append(rule.strip())
+        acl_lines.append("exit")
+        acl_lines.append(f"interface {interface}")
+        acl_lines.append(f"ip access-group {acl_name} {direction}")
+        device.send_config_set(acl_lines)
         print("✅ ACL dikonfigurasi untuk Aruba.")
 
     elif vendor_type == 'mikrotik':
@@ -244,90 +295,159 @@ def access_list(device, vendor_type):
 
 
 
-#fungsi untuk hapus acl
 def hapus_acl(device, vendor_type):
-    acl_number = input("Masukkan nomor ACL yang ingin dihapus: ")
-    interface = input("Masukkan nama interface yang terpasang ACL (contoh: FastEthernet0/1): ")
-    direction = input("Masukkan arah ACL (in / out): ").lower()
+    print("\n📌 Kamu bisa memilih untuk menghapus ACL dari interface, atau dari konfigurasi ACL-nya, atau keduanya.")
 
-    if vendor_type in ['cisco_ios', 'dell_os']:
+    acl_number = input("Masukkan nomor ACL: ").strip()
+    interface = input("Masukkan nama interface yang terpasang ACL (biarkan kosong jika tidak ingin menghapus dari interface): ").strip()
+
+    commands = []
+
+    if interface:
+        direction = input("Masukkan arah ACL (in / out): ").lower()
+        if direction not in ['in', 'out']:
+            print("❌ Arah ACL tidak valid. Gunakan 'in' atau 'out'.")
+            return
+
+        konfirmasi = input(f"Yakin ingin menghapus ACL {acl_number} dari interface {interface} arah {direction}? (y/n): ").lower()
+        if konfirmasi == 'y':
+            if vendor_type in ['cisco_ios', 'dell_os']:
+                commands += [
+                    f"interface {interface}",
+                    f"no ip access-group {acl_number} {direction}"
+                ]
+            elif vendor_type == 'aruba_os':
+                acl_name = f"ACL_{acl_number}"
+                commands += [
+                    f"interface {interface}",
+                    f"no ip access-group {acl_name} {direction}"
+                ]
+
+    # Tanya apakah ACL-nya juga ingin dihapus dari konfigurasi
+    hapus_acl_global = input("Apakah kamu juga ingin menghapus rule ACL dari konfigurasi (y/n)? ").lower()
+    if hapus_acl_global == 'y':
+        if vendor_type in ['cisco_ios', 'dell_os']:
+            commands.append(f"no access-list {acl_number}")
+        elif vendor_type == 'aruba_os':
+            acl_name = f"ACL_{acl_number}"
+            commands.append(f"no ip access-list extended {acl_name}")
+
+    # Eksekusi
+    if commands:
+        try:
+            output = device.send_config_set(commands)
+            print(output)
+            print("✅ Proses penghapusan selesai.")
+        except Exception as e:
+            print(f"❌ Gagal: {e}")
+    else:
+        print("ℹ️ Tidak ada perintah yang dijalankan.")
+
+# Fungsi untuk menampilkan status dan konfigurasi perangkat
+def show_device_status(device, vendor_type):
+    print("\n=== Menampilkan Status dan Konfigurasi ===")
+
+    # Perintah untuk vendor Cisco, Aruba, Dell, MikroTik
+    if vendor_type == 'cisco_ios':
         commands = [
-            f"interface {interface}",
-            f"no ip access-group {acl_number} {direction}",
-            f"no access-list {acl_number}"  # Menghapus ACL
+            "show interface brief",
+            "show vlan brief",
+            "show interface trunk",
+            "show running-config"
         ]
-
     elif vendor_type == 'aruba_os':
-        acl_name = f"ACL_{acl_number}"
         commands = [
-            f"interface {interface}",
-            f"no ip access-group {acl_name} {direction}",
-            f"no ip access-list extended {acl_name}"  # Menghapus ACL
+            "show interface brief",
+            "show vlan brief",
+            "show interface trunk",
+            "show running-config"
         ]
-
+    elif vendor_type == 'dell_os':
+        commands = [
+            "show interface brief",
+            "show vlan brief",
+            "show interface trunk",
+            "show running-config"
+        ]
     elif vendor_type == 'mikrotik':
-        print("Daftar firewall filter saat ini:")
-        filters = device.send_command("/ip firewall filter print")
-        print(filters)
-        rule_id = input("Masukkan nomor rule yang ingin dihapus (contoh: 0): ")
-        commands = [f"/ip firewall filter remove {rule_id}"]  # Menghapus rule
-
+        commands = [
+            "/interface print",
+            "/interface vlan print",
+            "/interface ethernet print",
+            "/interface print"
+        ]
     else:
         print("❌ Vendor tidak valid.")
         return
 
-    device.send_config_set(commands)
-    print("✅ ACL berhasil dihapus.")
+    # Eksekusi perintah dan tampilkan hasilnya
+    try:
+        for command in commands:
+            print(f"\n=== Hasil perintah: {command} ===")
+            output = device.send_command(command)
+            print(output)
+    except Exception as e:
+        print(f"❌ Gagal menampilkan status: {e}")
 
 
 # Fungsi utama
 def main():
-    vendor_type = vendor_selection()
-    if not vendor_type:
-        return
+    while True:  # Loop untuk memungkinkan mencoba kembali dari menu utama
+        vendor_type = vendor_selection()
+        if not vendor_type:
+            print("Operasi dibatalkan. Kembali ke menu utama...")
+            continue  # Jika vendor selection gagal atau Ctrl+C, kembali ke pemilihan vendor
 
-    device = connect_device(vendor_type)
-    if not device:
-        return
+        device = connect_device(vendor_type)
+        if not device:
+            print("Gagal terhubung ke perangkat. Kembali ke menu utama...")
+            continue  # Jika gagal terhubung, kembali ke pemilihan vendor
 
-    while True:
-        print("\n=== MENU SWITCH AUTOMATION ===")
-        print("1. Konfigurasi VLAN Access")
-        print("2. Konfigurasi Port Security")
-        print("3. Konfigurasi STP")
-        print("4. Konfigurasi Trunk Port")
-        print("5. Ganti Hostname")
-        print("6. Save Configuration")
-        print("7. Konfigurasi Access-List")
-        print("8. Hapus ACL")
-        print("9. Keluar")
-        
+        while True:
+            try:
+                print("\n=== MENU SWITCH AUTOMATION ===")
+                print("1. Konfigurasi VLAN Access")
+                print("2. Konfigurasi Port Security")
+                print("3. Konfigurasi STP")
+                print("4. Konfigurasi Trunk Port")
+                print("5. Ganti Hostname")
+                print("6. Save Configuration")
+                print("7. Konfigurasi Access-List")
+                print("8. Hapus ACL")
+                print("9. Tampilkan Status dan Konfigurasi")
+                print("10. Keluar")
 
-        choice = input("Pilih menu [1-9]: ")
+                choice = input("Pilih menu [1-10]: ")
 
-        if choice == '1':
-            vlan_access(device, vendor_type)
-        elif choice == '2':
-            port_security(device, vendor_type)
-        elif choice == '3':
-            stp_config(device, vendor_type)
-        elif choice == '4':
-            trunk_port_config(device, vendor_type)
-        elif choice == '5':
-            ganti_hostname(device, vendor_type)
-        elif choice == '6':
-            save_config(device)
-        elif choice == '7':
-            access_list(device, vendor_type)
-        elif choice == '8':
-            hapus_acl(device, vendor_type)
-        elif choice == '9':
-            print("Keluar.")
-            break
-        else:
-            print("❌ Menu tidak valid.")
+                if choice == '1':
+                    vlan_access(device, vendor_type)
+                elif choice == '2':
+                    port_security(device, vendor_type)
+                elif choice == '3':
+                    stp_config(device, vendor_type)
+                elif choice == '4':
+                    trunk_port_config(device, vendor_type)
+                elif choice == '5':
+                    ganti_hostname(device, vendor_type)
+                elif choice == '6':
+                    save_config(device, vendor_type)
+                elif choice == '7':
+                    access_list(device, vendor_type)
+                elif choice == '8':
+                    hapus_acl(device, vendor_type)
+                elif choice == '9':
+                    show_device_status(device, vendor_type)
+                elif choice == '10':
+                    print("Keluar.")
+                    device.disconnect()  # Disconnect setelah keluar dari menu
+                    break  # Keluar dari menu ini dan kembali ke pemilihan vendor
+                else:
+                    print("❌ Menu tidak valid.")
+            except KeyboardInterrupt:
+                print("\nCtrl+C terdeteksi. Kembali ke menu Switch Automation...")
+                continue  # Kembali ke menu Switch Automation tanpa keluar ke menu vendor
 
-    device.disconnect()
+        print("\nKembali ke menu utama...\n")  # Setelah keluar dari perangkat, kembali ke menu vendor
 
 if __name__ == "__main__":
     main()
