@@ -1,6 +1,6 @@
 Setup :
 1. install ubuntu atau jenis nya.
-2. sudo git clone https://github.com/KevinAprianto13/Managmenet-Switch-via-Automation-with-Python.git
+2. sudo git clone https://github.com/KevinAprianto13/Managment-Switch-via-Automation-with-Python.git
    ![download script](https://github.com/user-attachments/assets/00ebd459-eb63-456a-a76f-e9f9a9f5ee4f)
 3. cd Managmenet-Switch-via-Automation-with-Python
    ![masuk ke diretory yang sudah di download](https://github.com/user-attachments/assets/a8673570-620b-4fce-8d7b-f05796c9e9e2)
