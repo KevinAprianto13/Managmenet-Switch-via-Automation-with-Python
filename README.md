@@ -11,7 +11,7 @@ Setup :
    ![auto run](https://github.com/user-attachments/assets/6ceae8b7-4e57-40fc-90c1-69950056c165)
 6. source ~/.bashrc
 7. python3 app.py (optional, manual menjalankan script nya)
-8. buka tab terminal baru untuk pengetesan autorun yang sudah di sebut tersebut.
+8. buka tab terminal baru untuk pengetesan autorun yang sudah di setup tersebut.
 9. selanjut setup by gns3 untuk simulasi nya atau jika punya real device bisa di simulasikan.
     ![topology](https://github.com/user-attachments/assets/491d8ba8-495e-45d8-bf73-116b3eec3c51)
 10. Buat vlan managment untuk remote dan vlan untuk internet di mikrotik
