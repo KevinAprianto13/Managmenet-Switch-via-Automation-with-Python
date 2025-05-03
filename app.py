@@ -190,23 +190,33 @@ def save_config(device):
 def access_list(device, vendor_type):
     acl_number = input("Masukkan nomor ACL (contoh: 10 atau 110): ")
     action = input("Masukkan Aturan (permit / deny): ").lower()
-    source = input("Masukkan Source IP (contoh: 192.168.1.0 0.0.0.255 / any / host 192.168.1.10): ")
     protocol = input("Masukkan Protocol (ip / tcp / udp): ").lower()
-    destination = input("Masukkan Destination IP (contoh: any / host 10.0.0.1): ")
-    port = input("Masukkan port (kosongkan jika tidak perlu, contoh: eq 80): ")
+
+    # Source
+    source = input("Masukkan Source IP (contoh: 192.168.1.0 / any / host 192.168.1.10): ").strip()
+    if source not in ["any"] and not source.startswith("host"):
+        wildcard_source = input("Masukkan wildcard bits untuk source (contoh: 0.0.0.255): ").strip()
+        source = f"{source} {wildcard_source}"
+
+    # Destination
+    destination = input("Masukkan Destination IP (contoh: 10.0.0.0 / any / host 10.0.0.1): ").strip()
+    if destination not in ["any"] and not destination.startswith("host"):
+        wildcard_destination = input("Masukkan wildcard bits untuk destination (contoh: 0.0.0.255): ").strip()
+        destination = f"{destination} {wildcard_destination}"
+
+    # Lainnya
+    port = input("Masukkan port (kosongkan jika tidak perlu, contoh: eq 80): ").strip()
     interface = input("Masukkan interface yang akan diberi ACL (contoh: FastEthernet0/1): ")
     direction = input("Masukkan arah ACL (in / out): ").lower()
 
     if vendor_type in ['cisco_ios', 'dell_os']:
-        # Perintah untuk membuat ACL di Cisco
-        acl_cmd = f"access-list {acl_number} {action} {source} {destination} {port}".strip()
+        acl_cmd = f"access-list {acl_number} {action} {protocol} {source} {destination} {port}".strip()
         apply_cmd = [
             f"interface {interface}",
-            f"ip access-group {acl_number} {direction}"  # Menggunakan perintah 'ip access-group' di Cisco
+            f"ip access-group {acl_number} {direction}"
         ]
-        # Kirim perintah ke perangkat Cisco
         device.send_config_set([acl_cmd] + apply_cmd)
-        print("✅ ACL dikonfigurasi.")
+        print("✅ ACL dikonfigurasi untuk Cisco/Dell.")
 
     elif vendor_type == 'aruba_os':
         acl_name = f"ACL_{acl_number}"
@@ -218,11 +228,11 @@ def access_list(device, vendor_type):
             f"ip access-group {acl_name} {direction}"
         ]
         device.send_config_set(acl_cmd)
-        print("✅ ACL dikonfigurasi.")
+        print("✅ ACL dikonfigurasi untuk Aruba.")
 
     elif vendor_type == 'mikrotik':
         mikrotik_chain = "forward"
-        command = f"/ip firewall filter add chain={mikrotik_chain} src-address={source} dst-address={destination} protocol={protocol}"
+        command = f"/ip firewall filter add chain={mikrotik_chain} src-address={source.split()[0]} dst-address={destination.split()[0]} protocol={protocol}"
         if port:
             command += f" dst-port={port.split()[-1]}"
         command += f" action={'accept' if action == 'permit' else 'drop'}"
@@ -231,7 +241,7 @@ def access_list(device, vendor_type):
 
     else:
         print("❌ Vendor tidak valid.")
-        return
+
 
 
 #fungsi untuk hapus acl
