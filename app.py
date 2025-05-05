@@ -1,6 +1,10 @@
 from netmiko import ConnectHandler
 import getpass
 import time
+import json
+import random
+from difflib import get_close_matches
+from colorama import init, Fore, Back, Style
 
 # Fungsi untuk memilih vendor perangkat
 def vendor_selection():
@@ -86,6 +90,7 @@ def vlan_access(device, vendor_type):
     vlan = input("Masukkan VLAN ID: ")
     nama_vlan = input("Masukkan nama VLAN: ")
     port = input("Masukkan port (contoh 1/0/1): ")
+    descriptions = input("Masukan Descriptions Interface (contoh IT/HRD/etc): ")
 
     if vendor_type == 'cisco_ios' or vendor_type == 'dell_os':
         commands = [
@@ -94,20 +99,23 @@ def vlan_access(device, vendor_type):
             f"interface {port}",
             "switchport mode access",
             f"switchport access vlan {vlan}",
+            f"description {descriptions}",
             "no shutdown"
         ]
     elif vendor_type == 'aruba_os':
         commands = [
             f"vlan {vlan} name {nama_vlan}",
             f"interface {port}",
-            f"vlan {vlan}",
+            f"description {descriptions}",
+            f"vlan access {vlan}",
             "no shutdown"
         ]
     elif vendor_type == 'mikrotik':
         commands = [
             f"/interface vlan add name={nama_vlan} vlan-id={vlan} interface=ether1",
+            f"/interface ethernet set [find name={port}] comment=\"{descriptions}\"",
             f"/interface ethernet switch port set {port} vlan-mode=secure vlan-header=always-strip",
-            f"/interface ethernet switch port vlan-member add vlan-id={vlan} ports={port}"
+            f"/interface ethernet switch vlan add vlan-id={vlan} ports={port}"
         ]
     else:
         print("❌ Vendor tidak valid.")
@@ -115,6 +123,7 @@ def vlan_access(device, vendor_type):
 
     device.send_config_set(commands)
     print("✅ VLAN Access dikonfigurasi.")
+
 
 # Fungsi untuk konfigurasi Port Security
 def port_security(device, vendor_type):
@@ -390,6 +399,68 @@ def show_device_status(device, vendor_type):
         print(f"❌ Gagal menampilkan status: {e}")
 
 
+def configure_ntp(device, vendor_type):
+    ntp_server = input("Masukkan NTP server IP: ")
+
+    if vendor_type == 'cisco_ios' or vendor_type == 'dell_os':
+        commands = [
+            f"ntp server {ntp_server}"
+        ]
+    elif vendor_type == 'aruba_os':
+        commands = [
+            f"ntp server {ntp_server}"
+        ]
+    elif vendor_type == 'mikrotik':
+        commands = [
+            f"/system ntp client set enabled=yes server={ntp_server}"
+        ]
+    else:
+        print("❌ Vendor tidak valid.")
+        return
+
+    device.send_config_set(commands)
+    print("✅ NTP server dikonfigurasi.")
+
+def configure_bpdu_guard(connection, vendor):
+    interface = input("Masukkan nama interface yang akan dikonfigurasi (contoh: GigabitEthernet1/0/10): ")
+
+    if vendor == "cisco":
+        commands = [
+            f"interface {interface}",
+            "spanning-tree bpduguard enable"
+        ]
+    elif vendor == "aruba":
+        commands = [
+            f"interface {interface}",
+            "spanning-tree bpdu-protection"
+        ]
+    elif vendor == "dell":
+        commands = [
+            f"interface {interface}",
+            "spanning-tree bpduguard"
+        ]
+    elif vendor == "mikrotik":
+        commands = [
+            "/interface bridge filter add chain=input protocol=stp action=drop",
+            "/interface bridge filter add chain=input protocol=rstp action=drop",
+            "/interface bridge filter add chain=input protocol=mstp action=drop"
+        ]
+    else:
+        print("❌ Vendor tidak dikenali.")
+        return
+
+    try:
+        output = connection.send_config_set(commands)
+        print("✅ BPDU Guard berhasil dikonfigurasi.")
+        print(output)
+    except Exception as e:
+        print(f"❌ Gagal mengatur BPDU Guard: {e}")
+
+
+
+
+
+
 # Fungsi utama
 def main():
     while True:  # Loop untuk memungkinkan mencoba kembali dari menu utama
@@ -415,9 +486,11 @@ def main():
                 print("7. Konfigurasi Access-List")
                 print("8. Hapus ACL")
                 print("9. Tampilkan Status dan Konfigurasi")
-                print("10. Keluar")
+                print("10. NTP Konfigurasi")
+                print("11. BPDU Konfigurasi")
+                print("12. Keluar")
 
-                choice = input("Pilih menu [1-10]: ")
+                choice = input("Pilih menu [1-11]: ")
 
                 if choice == '1':
                     vlan_access(device, vendor_type)
@@ -438,6 +511,10 @@ def main():
                 elif choice == '9':
                     show_device_status(device, vendor_type)
                 elif choice == '10':
+                    configure_ntp(device, vendor_type)
+                elif choice == '11':
+                    configure_bpdu_guard(device, vendor_type)
+                elif choice == '12':
                     print("Keluar.")
                     device.disconnect()  # Disconnect setelah keluar dari menu
                     break  # Keluar dari menu ini dan kembali ke pemilihan vendor
